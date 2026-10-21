@@ -1,0 +1,19 @@
+# Game data: never commit (copyrighted, large). Rebuild from your own disc.
+*.iso
+/game/
+
+# Third-party tools and the PS2Recomp clone (its own git repo, branch "drakengard")
+/tools/
+/PS2Recomp/
+
+# Generated code and Ghidra project (reproducible with scripts/ and recomp/*.toml)
+/recomp/output/
+/recomp/output_ghidra/
+/recomp/ghidra/project/
+
+# Run artifacts
+/recomp/captures/
+/recomp/*.log
+/recomp/ghidra/*.log
+/recomp/profile*.txt
+/recomp/*.ppm
