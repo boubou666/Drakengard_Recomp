@@ -96,6 +96,32 @@ rasterizer, which runs on the EE thread:
 Remaining prologue cost is serial: texture uploads to 4/8-bit formats (`UploadImage`/`WriteP4`/`WriteP8`),
 small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%).
 
+## Performance work, round 2 (mission ~5 -> ~10 fps, menus/title at the game's cap)
+- VU interpreter (`ps2_vu1_core.cpp`): results are written at issue (every reader already stalls until its
+  operand latency has passed), stalls jump the clock, PATH1 progress is batched, MAC/status/clip flags go
+  through an issue-ordered FIFO with a fast path for results far from zero/denormal/FLT_MAX, decoded pairs are
+  cached lazily per code generation. ~3.75x faster and bit-exact (registers, VU1 data, PATH1 packets, cycle
+  counts) against the previous interpreter on 3000 recorded mission runs (`ps2_vu1_replay`, below).
+- GS thread (`gs_frontend.cpp`): GIF packets are queued and processed off the EE thread; EE-facing GS calls
+  (register writes, clears, local->host reads) drain the queue first. `PS2X_GS_SYNC=1` restores sync mode.
+- Rasterizer: triangles visit only each row's covered span; the row worker pool spins briefly between jobs;
+  the parallel threshold uses the triangle's area. IOP scheduler: one pass over threads per timeslice.
+- Opt-in batched banded rasterization (`PS2X_GS_BATCH=1`): queued triangles/sprites drawn by 32 row bands across
+  the pool with a 16-slot texel cache (CLUT snapshots, small textures decoded at queue time) and page-conflict
+  flushes. Off by default: `PS2X_GS_SHADOW_CHECK` still finds a rare texture-page mismatch.
+- Mission EE thread now: ~45% VU1, ~15% IOP, rest waiting; GS thread and 7 workers do the pixels (the sky band
+  alone is ~6M covered pixels per frame).
+
+## Shared PS2Recomp fork with the Valkyrie Profile 2 recomp (D:\VP2S_Recomp)
+- Its fork (boubou666/PS2Recomp, branch `vp2s/overlay-dispatch`) is fetched here as remote `vp2s`.
+- Local branch `shared/runtime` (ab297e8) = VP2 tip 59f6cd2 merged with `drakengard`: VU fast core + VP2's
+  JR/JALR fix, run-to-completion budget, FLG 3, PS2 FMAC addition; VP2's IOP heap/SPU2 sound/MPEG/SIO2 work;
+  VP2's async GS backend + Drakengard's interlaced presentation fixes. Nothing pushed; merging into VP2's branch
+  and any push need the user's go-ahead.
+- Drakengard development stays on `drakengard` for now: VP2's backend rasterizes ~3x slower serially here, and
+  its async mode (`PS2X_GS_ASYNC_RASTER=1` on the shared branch) differs from immediate drawing in the boot
+  frame copies (shadow check). Combining both backends is the open item.
+
 ## Test harness (opt-in, environment variables)
 - `PS2X_CAPTURE_DIR=<folder>` (+ `PS2X_CAPTURE_INTERVAL=<sec>`, default 5): the runtime saves the presented
   frame as `frame_<tenths of a second>.png` (`ps2_runtime.cpp`, `UploadFrame`); works minimized/unfocused.
@@ -106,10 +132,15 @@ small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%
   (the `Fast` link writes a `.map`).
 - `PS2X_INPUT_SCRIPT="sec:mask:dur;..."`: holds pad buttons (hex, active-high: Start 0008, Cross 4000,
   Circle 2000, Left 0080, Right 0020, Up 0010, Down 0040) `sec` seconds after boot (`runtime/zz_drakengard_overrides.cpp`).
-- New game from boot: `115:0008:0.5;125:4000:0.5;136:0080:0.3;140:4000:0.5`, then Cross every ~8 s from 185 s
-  (prologue text, "Chapter 1 Verse 2" briefing -> Continue, mission objective/hint dialogs). Mission gameplay
-  starts around 270-290 s; timing drifts with machine load, so keep pressing.
+- New game from boot: `recomp/input_newgame.txt` (Start at 115 s, then Left+Cross pairs every 6 s until 157 s
+  so the NEW GAME prompt gets "Yes" whatever the timing, then Cross every 6 s: prologue, "Chapter 1 Verse 2"
+  briefing -> Continue, mission dialogs). The mission starts around 230-270 s; timing drifts with speed.
 - `PS2X_TRACE_CDREAD=1`: logs every sceCdRead. `PS2X_DUMP_EE_THREADS=<sec>`: periodic guest thread dump.
+- `PS2X_VU1_RECORD=<file>` (+ `PS2X_VU1_RECORD_AT=<sec>`, `PS2X_VU1_RECORD_COUNT=<n>`): records VU1 microprogram
+  runs; `ps2_vu1_replay <file> [repeat]` (`scripts/build_vu1_replay.bat`) replays them against the current
+  interpreter, diffs registers/memory/packets/cycles and times it. Mission trace: `recomp/mission.vu1trace`.
+- `PS2X_GS_SHADOW_CHECK=1`: a second, synchronous, unbatched GS receives every command; VRAM is compared at
+  every 4th GS-thread drain (`[gs-shadow-check]` lines).
 - `PS2X_GS_DUMP_AT=<sec>` (+ `PS2X_GS_DUMP_COUNT`, `PS2X_GS_DUMP_OUT`): writes the next N GS primitives (draw
   state + vertices) and the GIF tags feeding them, tagged with the GIF path and VU1 program (`vu1pc`).
   `recomp/analyze_gs_dump.py` summarizes triangle sizes; `recomp/vudis.py` disassembles VU microcode.
@@ -119,12 +150,15 @@ Boots through logos, title, main menu, difficulty prompt, prologue text (advance
 Beginnings", the Verse 2 briefing, and into the first mission: HUD, radar, objective map, hint and in-mission
 dialog ("Lord Caim! The Empire has surrounded the castle!"), with textured, lit 3D geometry (stone pillars).
 Known issues / next steps:
-- Mission performance ~5 fps. EE thread: ~45% VU1 interpreter (cycle-accurate pipeline model:
-  `commitReadyPipelines`, operand normalization, hazard scheduling), ~25% rasterizer. Needs a faster VU1 path.
+- Mission performance ~9-10 fps (NTSC pacing). Bound by VU1 interpretation on the EE thread and by per-pixel
+  rasterization cost (sky band overdraw) on the GS side.
+- Missing: the Chapter 1 Verse 1 opening FMV (movie streaming from MOVIE0EU.BIN starts ~205 s, our MPEG path
+  shows grey and the scripted Cross skips it); the fork's MPEG fixes on `shared/runtime` are the first thing
+  to try. No sound yet (the fork's SPU2 emulation is on `shared/runtime`).
 - The sky band (EE-built REGLIST triangles, texture 12288, z=0) has vertices clamped to 0 and draws ~300
   screen-sized triangles per frame; unclear whether that is accurate. The ground is untextured fog so far, and
   the camera framing (pillars hanging from the top) has not been checked against real hardware.
-- Prologue/briefing screens run at ~9 fps; logos/title/menus locked at 30 fps.
+- Prologue/briefing screens ~10 fps; logos/title/menus at the game's 30 fps cap.
 - Intro movie: streaming starts after the logos (`sceCdStStart` on MOVIE0EU.BIN) but the MPEG decoder stalls
   (`DemuxPssRing:BACKPRESSURE`) and the game skips to the title.
 - Testing tip: bringing the window to the foreground during automated runs registered Enter (Start) presses;

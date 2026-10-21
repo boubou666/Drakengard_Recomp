@@ -20,3 +20,4 @@
 /recomp/gs_prims*.txt
 /recomp/vu1_prog*.txt
 /recomp/profile*_sym.txt
+/recomp/*.vu1trace
