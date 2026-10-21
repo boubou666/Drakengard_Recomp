@@ -65,6 +65,19 @@ Runtime (generic, candidates for upstream):
    (`ps2FpuCompareKey`: no NaN/Inf, exponent 255 is a huge value, denormals = 0). Drakengard seeds a
    nearest-object search with 0x7FFFFFFF ("max float", NaN on the host), so no object was ever linked and a
    comb sort on 0 elements hung forever right after NEW GAME.
+9. EE `cvt.w.s` truncates toward zero and saturates (`ps2FpuCvtWS`). It used the host rounding mode, so the
+   mission loader's comb sort (`gap = int(gap / 1.3)`) stayed at gap 2 forever.
+10. Recompiler: VU0 `vf0` is hard-wired to (0,0,0,1). Macro-mode instructions that write vf0 are followed by a
+    restore (`InstructionTranslator::translate`); a clobbered vf0 turned object distances into NaN and left
+    mission object groups empty (another infinite comb sort).
+11. SPR DMA (`tryProcessScratchpadDma`) accepts MADR in the VU memory window (0x11000000+). Drakengard's VU0
+    vertex pipeline copies results out of VU0 data memory (0x11004AE0) with toSPR; that copy was dropped, so
+    stale input floats were sent to the GS as vertices (screen-sized garbage triangles, ~1 fps).
+12. VU MAX/MINI compare raw sign-magnitude bits and ABS only clears the sign bit (`ps2_vu1_upper.cpp`). They
+    flushed denormal operands to 0, and Drakengard's VU1 program `max`es integer vertex colors against 0, so
+    every 3D vertex color became black.
+13. VIF0 shares VIF1's UNPACK implementation (all formats, masks, MODE, ROW/COL; `executeVifUnpack`) and
+    handles MSCAL/MSCALF/MSCNT. It used to unpack only 32-bit formats and stopped at the first unknown VIFcode.
 
 ## Performance work (game frames/s: logos 11 -> 30, title/menu 6 -> 30, prologue ~5 -> 20)
 Measured with `PS2X_FPS_LOG=1` and the sampling profiler (see harness). The bottleneck was the software GS
@@ -93,15 +106,25 @@ small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%
   (the `Fast` link writes a `.map`).
 - `PS2X_INPUT_SCRIPT="sec:mask:dur;..."`: holds pad buttons (hex, active-high: Start 0008, Cross 4000,
   Circle 2000, Left 0080, Right 0020, Up 0010, Down 0040) `sec` seconds after boot (`runtime/zz_drakengard_overrides.cpp`).
-- New game from boot: `115:0008:0.5;125:4000:0.5;136:0080:0.3;140:4000:0.5`.
+- New game from boot: `115:0008:0.5;125:4000:0.5;136:0080:0.3;140:4000:0.5`, then Cross every ~8 s from 185 s
+  (prologue text, "Chapter 1 Verse 2" briefing -> Continue, mission objective/hint dialogs). Mission gameplay
+  starts around 270-290 s; timing drifts with machine load, so keep pressing.
+- `PS2X_TRACE_CDREAD=1`: logs every sceCdRead. `PS2X_DUMP_EE_THREADS=<sec>`: periodic guest thread dump.
+- `PS2X_GS_DUMP_AT=<sec>` (+ `PS2X_GS_DUMP_COUNT`, `PS2X_GS_DUMP_OUT`): writes the next N GS primitives (draw
+  state + vertices) and the GIF tags feeding them, tagged with the GIF path and VU1 program (`vu1pc`).
+  `recomp/analyze_gs_dump.py` summarizes triangle sizes; `recomp/vudis.py` disassembles VU microcode.
 
 ## Current state
-Boots through logos, title screen, main menu (NEW GAME / LOAD GAME / OPTIONS), the difficulty prompt, and into
-the prologue story text ("It is an ancient time, and dragons still roam upon the earth...", `screenshots/`),
-where it currently stays.
+Boots through logos, title, main menu, difficulty prompt, prologue text (advance with Cross), "Chapter 1
+Beginnings", the Verse 2 briefing, and into the first mission: HUD, radar, objective map, hint and in-mission
+dialog ("Lord Caim! The Empire has surrounded the castle!"), with textured, lit 3D geometry (stone pillars).
 Known issues / next steps:
-- Performance: logos/title/menus locked at 30 fps; prologue at 20 fps (see above for what remains).
-- Prologue text does not advance yet (narration audio / button wait to investigate).
+- Mission performance ~5 fps. EE thread: ~45% VU1 interpreter (cycle-accurate pipeline model:
+  `commitReadyPipelines`, operand normalization, hazard scheduling), ~25% rasterizer. Needs a faster VU1 path.
+- The sky band (EE-built REGLIST triangles, texture 12288, z=0) has vertices clamped to 0 and draws ~300
+  screen-sized triangles per frame; unclear whether that is accurate. The ground is untextured fog so far, and
+  the camera framing (pillars hanging from the top) has not been checked against real hardware.
+- Prologue/briefing screens run at ~9 fps; logos/title/menus locked at 30 fps.
 - Intro movie: streaming starts after the logos (`sceCdStStart` on MOVIE0EU.BIN) but the MPEG decoder stalls
   (`DemuxPssRing:BACKPRESSURE`) and the game skips to the title.
 - Testing tip: bringing the window to the foreground during automated runs registered Enter (Start) presses;

@@ -17,3 +17,6 @@
 /recomp/ghidra/*.log
 /recomp/profile*.txt
 /recomp/*.ppm
+/recomp/gs_prims*.txt
+/recomp/vu1_prog*.txt
+/recomp/profile*_sym.txt
