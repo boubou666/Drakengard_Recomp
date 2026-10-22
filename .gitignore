@@ -2,7 +2,7 @@
 *.iso
 /game/
 
-# Third-party tools and the PS2Recomp clone (its own git repo, branch "drakengard")
+# Third-party tools and the PS2Recomp clone (its own git repo, branch "main")
 /tools/
 /PS2Recomp/
 
