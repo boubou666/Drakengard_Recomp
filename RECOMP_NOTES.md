@@ -113,14 +113,20 @@ small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%
   alone is ~6M covered pixels per frame).
 
 ## Shared PS2Recomp fork with the Valkyrie Profile 2 recomp (D:\VP2S_Recomp)
-- Its fork (boubou666/PS2Recomp, branch `vp2s/overlay-dispatch`) is fetched here as remote `vp2s`.
-- Local branch `shared/runtime` (ab297e8) = VP2 tip 59f6cd2 merged with `drakengard`: VU fast core + VP2's
-  JR/JALR fix, run-to-completion budget, FLG 3, PS2 FMAC addition; VP2's IOP heap/SPU2 sound/MPEG/SIO2 work;
-  VP2's async GS backend + Drakengard's interlaced presentation fixes. Nothing pushed; merging into VP2's branch
-  and any push need the user's go-ahead.
-- Drakengard development stays on `drakengard` for now: VP2's backend rasterizes ~3x slower serially here, and
-  its async mode (`PS2X_GS_ASYNC_RASTER=1` on the shared branch) differs from immediate drawing in the boot
-  frame copies (shadow check). Combining both backends is the open item.
+- Both projects use one branch, `main` on boubou666/PS2Recomp (remote `fork`). It holds VP2's fork merged with
+  `drakengard`: VU fast core + VP2's JR/JALR fix, run-to-completion budget, FLG 3, PS2 FMAC addition; VP2's IOP
+  heap/SPU2 sound/MPEG/SIO2 work and VU memory window fix; VP2's async GS backend + Drakengard's interlaced
+  presentation fixes. Pushes need the user's go-ahead.
+- VP2's GS backend rasterizes asynchronously with `PS2X_GS_ASYNC_RASTER=1`: workers own VRAM pages, barriers
+  order render-to-texture, write-after-read, and depth vs color writes. Since a1d155d the shadow check is clean
+  on Drakengard from boot into the first mission (the whole-buffer mismatch came from drains forgetting queued
+  writes, so workers reused the previous frame's decoded texture). Workers refresh their texture page caches
+  at barriers; the immediate path keeps the page cache that hides writes until TEXFLUSH.
+- Speed on main with async (no other game running): title at the 25 fps cap, mission ~8.2 fps, against ~10.3
+  for the `drakengard` branch backend. The mission is pixel-bound on the 8 workers (texture sampling, swizzled
+  CT32 writes, per-pixel barycentrics): porting faster per-pixel paths is what remains before Drakengard can
+  drop its own backend.
+- Robust new-game input script for async runs: `recomp/input_newgame_robust.txt` (Left+Cross pairs until 280 s).
 
 ## Test harness (opt-in, environment variables)
 - `PS2X_CAPTURE_DIR=<folder>` (+ `PS2X_CAPTURE_INTERVAL=<sec>`, default 5): the runtime saves the presented
@@ -153,8 +159,8 @@ Known issues / next steps:
 - Mission performance ~9-10 fps (NTSC pacing). Bound by VU1 interpretation on the EE thread and by per-pixel
   rasterization cost (sky band overdraw) on the GS side.
 - Missing: the Chapter 1 Verse 1 opening FMV (movie streaming from MOVIE0EU.BIN starts ~205 s, our MPEG path
-  shows grey and the scripted Cross skips it); the fork's MPEG fixes on `shared/runtime` are the first thing
-  to try. No sound yet (the fork's SPU2 emulation is on `shared/runtime`).
+  shows grey and the scripted Cross skips it); the fork's MPEG fixes on `main` are the first thing
+  to try. No sound yet (the fork's SPU2 emulation is on `main`).
 - The sky band (EE-built REGLIST triangles, texture 12288, z=0) has vertices clamped to 0 and draws ~300
   screen-sized triangles per frame; unclear whether that is accurate. The ground is untextured fog so far, and
   the camera framing (pillars hanging from the top) has not been checked against real hardware.

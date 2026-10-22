@@ -13,5 +13,5 @@ This repository holds the project around the recompiler, not the game:
 It contains no game data: no ISO, no extracted files, no recompiled game code. You need your own copy of the game.
 
 The runtime changes made for this game are in the PS2Recomp fork
-[boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp), branch `shared/runtime`, shared with a
+[boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp), branch `main`, shared with a
 Valkyrie Profile 2 recompilation.
