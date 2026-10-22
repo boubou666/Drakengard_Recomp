@@ -6,6 +6,7 @@
 #include "runtime/ee_scheduler.h"
 #include "ps2_recompiled_functions.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <sstream>
@@ -28,14 +29,21 @@ namespace
         }
     }
 
+    // Game frames so far (the main loop resets its VSync gate at 0x2800D4 once per frame).
+    std::atomic<uint32_t> g_gameFrames{0u};
+
     // Test harness for unattended runs: PS2X_INPUT_SCRIPT="sec:mask:dur;..." holds the pad buttons in
     // `mask` (hex, active-high, Start=0008 Cross=4000 Circle=2000 Up=0010 Down=0040) for `dur` seconds,
-    // starting `sec` seconds after boot.
+    // starting `sec` seconds after boot. With PS2X_INPUT_SCRIPT_CLOCK=frames, `sec` and `dur` count
+    // game frames instead, so a script keeps its place in the game at any emulation speed (the
+    // seconds-based log lines give each press's frame).
     void startInputScriptFromEnvironment()
     {
         const char *script = std::getenv("PS2X_INPUT_SCRIPT");
         if (!script || !*script)
             return;
+        const char *clock = std::getenv("PS2X_INPUT_SCRIPT_CLOCK");
+        const bool frameClock = clock && std::string(clock) == "frames";
 
         struct Step
         {
@@ -60,29 +68,47 @@ namespace
             }
         }
 
-        std::thread([steps]()
+        std::thread([steps, frameClock]()
                     {
                         const auto boot = std::chrono::steady_clock::now();
+                        auto waitUntil = [&](double point)
+                        {
+                            if (!frameClock)
+                            {
+                                std::this_thread::sleep_until(boot + std::chrono::duration<double>(point));
+                                return;
+                            }
+                            while (g_gameFrames.load(std::memory_order_relaxed) < static_cast<uint32_t>(point))
+                                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        };
                         for (const Step &step : steps)
                         {
-                            std::this_thread::sleep_until(boot + std::chrono::duration<double>(step.start));
+                            waitUntil(step.start);
                             ps2_stubs::setPadOverrideState(static_cast<uint16_t>(~step.mask), 0x80, 0x80, 0x80, 0x80);
-                            std::fprintf(stderr, "[input-script] t=%.1fs press mask=0x%04x\n", step.start, step.mask);
-                            std::this_thread::sleep_for(std::chrono::duration<double>(step.duration));
+                            const uint32_t frame = g_gameFrames.load(std::memory_order_relaxed);
+                            std::fprintf(stderr, "[input-script] t=%.1f%s frame=%u press mask=0x%04x\n", step.start,
+                                         frameClock ? "f" : "s", frame, step.mask);
+                            waitUntil(frameClock ? frame + step.duration : step.start + step.duration);
                             ps2_stubs::clearPadOverrideState();
                         } })
             .detach();
     }
 
-    // PS2X_FPS_LOG=1: count game frames (the main loop resets its VSync gate at 0x2800D4 once per frame).
+    // Counts game frames for the input script's frame clock; PS2X_FPS_LOG=1 also prints frames/s.
     void countedFrameGateReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
+        static const bool logFps = []
+        {
+            const char *fpsLog = std::getenv("PS2X_FPS_LOG");
+            return fpsLog && *fpsLog == '1';
+        }();
         static uint32_t frames = 0u;
         static auto windowStart = std::chrono::steady_clock::now();
+        g_gameFrames.fetch_add(1u, std::memory_order_relaxed);
         ++frames;
         const auto now = std::chrono::steady_clock::now();
         const double elapsed = std::chrono::duration<double>(now - windowStart).count();
-        if (elapsed >= 5.0)
+        if (logFps && elapsed >= 5.0)
         {
             std::fprintf(stderr, "[fps] game frames/s=%.1f\n", frames / elapsed);
             frames = 0u;
@@ -133,7 +159,9 @@ namespace
     void applyDrakengardEuOverrides(PS2Runtime &runtime)
     {
         startEeThreadDumpFromEnvironment(runtime);
-        if (const char *fpsLog = std::getenv("PS2X_FPS_LOG"); fpsLog && *fpsLog == '1')
+        const char *fpsLog = std::getenv("PS2X_FPS_LOG");
+        const char *inputScript = std::getenv("PS2X_INPUT_SCRIPT");
+        if ((fpsLog && *fpsLog == '1') || (inputScript && *inputScript))
             runtime.registerFunction(0x002800D4u, &countedFrameGateReset);
         if (const char *cdTrace = std::getenv("PS2X_TRACE_CDREAD"); cdTrace && *cdTrace == '1')
             runtime.registerFunction(0x0030B368u, &tracedCdRead);

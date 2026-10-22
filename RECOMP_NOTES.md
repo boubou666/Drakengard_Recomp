@@ -126,7 +126,12 @@ small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%
   for the `drakengard` branch backend. The mission is pixel-bound on the 8 workers (texture sampling, swizzled
   CT32 writes, per-pixel barycentrics): porting faster per-pixel paths is what remains before Drakengard can
   drop its own backend.
-- Robust new-game input script for async runs: `recomp/input_newgame_robust.txt` (Left+Cross pairs until 280 s).
+- Since 3ea7a5f (queued CLUT loads, no per-pixel shared counter) the async mission runs at ~9.4 fps; the
+  remaining gap to the old backend is split between the workers (each ~28% idle or at barriers) and the EE
+  (VU1 interpretation, now with VP2's exact FMAC addition).
+- `PS2X_INPUT_SCRIPT_CLOCK=frames` times the input script in game frames, so it keeps its place at any speed
+  (shadow-check runs are ~3x slower). `recomp/input_newgame_frames.txt` reaches the first mission; the seconds
+  log lines give each press's frame for recalibrating.
 
 ## Test harness (opt-in, environment variables)
 - `PS2X_CAPTURE_DIR=<folder>` (+ `PS2X_CAPTURE_INTERVAL=<sec>`, default 5): the runtime saves the presented
