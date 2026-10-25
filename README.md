@@ -6,7 +6,7 @@
 Not an emulator: the game's own MIPS R5900 code, rebuilt as a Windows program on a reimplementation of the PS2 hardware.
 
 ![Platform](https://img.shields.io/badge/platform-Windows-1b8cff)
-![Compiler](https://img.shields.io/badge/compiler-MSVC-1b8cff)
+![Compiler](https://img.shields.io/badge/compiler-GCC%20(MSYS2)-1b8cff)
 ![Based on](https://img.shields.io/badge/based%20on-PS2Recomp-17a35b)
 ![Status](https://img.shields.io/badge/status-not%20playable%20yet-d01f3c)
 
@@ -24,7 +24,7 @@ Not an emulator: the game's own MIPS R5900 code, rebuilt as a Windows program on
 
 **Work in progress, not playable yet.** The game boots through the logos, title screen and menus. **New Game** goes
 through the difficulty prompt, the prologue, "Chapter 1 Beginnings" and the mission briefing, into the first mission:
-HUD, radar, objective map, in-mission dialogue and textured, lit 3D. The mission runs at about 12 frames per second, there is
+HUD, radar, objective map, in-mission dialogue and textured, lit 3D. The mission runs at about 13 frames per second, there is
 no sound yet, and the Chapter 1 opening movie is skipped.
 
 | Milestone | |
@@ -80,11 +80,14 @@ fast VU1 interpreter, the multi-threaded GS rasterizer and the IOP scheduler.
 ## Requirements
 
 - Windows 10 or 11, Python 3
-- Visual Studio 2022 Build Tools ("Desktop development with C++": MSVC, CMake, Ninja)
+- [MSYS2](https://www.msys2.org/) with the UCRT64 toolchain, for the game executable:
+  `pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg}`
+- Visual Studio 2022 Build Tools ("Desktop development with C++": MSVC, CMake, Ninja), for the recompiler tools
 - To rebuild the function map only: Ghidra 12.1.4 in `tools\ghidra_12.1.4_PUBLIC`, the Emotion Engine extension for it, and JDK 21
 - Your own copy of `SLES-52322` (check the hash above), with the disc's files copied into `game/`
 
-The build scripts currently expect the repository at `D:\Drakengard_Recomp` and the default Build Tools location.
+The build scripts currently expect the repository at `D:\Drakengard_Recomp`, MSYS2 in `C:\msys64` (or `MSYS2_ROOT`) and
+the default Build Tools location.
 
 ## Build and run
 
@@ -94,18 +97,22 @@ cd D:\Drakengard_Recomp
 git clone https://github.com/boubou666/PS2Recomp.git PS2Recomp
 scripts\build_tools.bat
 PS2Recomp\out\build\ps2xRecomp\ps2_recomp.exe recomp\drakengard_ghidra.toml
+PS2Recomp\out\build\ps2xRecomp\ps2_vu_aot.exe game\SLES_523.22 recomp\vu1_aot
 python scripts\sync_runner.py
-scripts\build_runner.bat
+bash scripts/build_runner_gcc.sh
 ```
 
+`ps2_vu_aot` compiles the game's VU0/VU1 microcode ahead of time (`recomp\vu1_aot`); `CMakeLists.txt` builds it outside
+the unity batches at `-O3`. The game executable is built with GCC because MSVC takes many minutes per microcode file;
+`scripts\build_runner.bat` still builds an MSVC runner, without the compiled microcode, in `PS2Recomp\out\build-fast`.
 `recomp\ghidra\ghidra_run.bat` rebuilds the Ghidra function map from `game\SLES_523.22` if you need it. The first runner build
-takes about 40 minutes: the recompiled code is several hundred megabytes of C++.
+takes about an hour: the recompiled code is several hundred megabytes of C++.
 
 Run the game from its folder, which the runtime uses as `cdrom0:`:
 
 ```powershell
 cd game
-..\PS2Recomp\out\build-fast\ps2xRuntime\ps2EntryRunner.exe D:\Drakengard_Recomp\game\SLES_523.22
+..\build\gcc\PS2Recomp\ps2xRuntime\ps2EntryRunner.exe D:\Drakengard_Recomp\game\SLES_523.22
 ```
 
 Set `PS2X_GS_ASYNC_RASTER=1` to rasterize on worker threads (much faster; it will become the default).
@@ -129,7 +136,10 @@ A controller is used when one is connected; otherwise the keyboard (US key posit
 | Variable | Effect |
 |---|---|
 | `PS2X_GS_ASYNC_RASTER=1` | Rasterize on worker threads |
-| `PS2X_VIF1_ASYNC=1` | Experimental: run VIF1 transfers and VU1 programs on their own thread |
+| `PS2X_VIF1_THREAD=1` | Experimental: run VIF1 transfers and VU1 programs on their own thread |
+| `PS2X_GS_LAG=1` | Let the GS run up to a frame behind the EE |
+| `PS2X_GS_RENDERER=parallel` | Draw with the paraLLEl-GS Vulkan renderer instead of the CPU rasterizer |
+| `PS2X_VU_AOT=0` | Run all VU microcode in the interpreter instead of the code compiled ahead of time |
 | `PS2X_FPS_LOG=1` | Print the game's frames per second every 5 s |
 | `PS2X_CAPTURE_DIR=<dir>`, `PS2X_CAPTURE_INTERVAL=<s>` | Save the presented frame every few seconds (works minimized) |
 | `PS2X_INPUT_SCRIPT=sec:mask:dur;…`, `PS2X_INPUT_SCRIPT_CLOCK=frames` | Scripted pad input for unattended runs, timed in seconds or in game frames (`recomp/input_newgame_frames.txt` plays from boot into the first mission) |
@@ -140,15 +150,16 @@ A controller is used when one is connected; otherwise the keyboard (US key posit
 | `PS2X_GS_DUMP_AT=<s>` | Log the next GS primitives with their state and the GIF tags that produced them |
 | `PS2X_TRACE_CDREAD=1`, `PS2X_DUMP_EE_THREADS=<s>` | Log every CD read; periodically print every guest thread |
 
-`scripts\run_game.sh <seconds> <log>` runs the game for a fixed time and refuses to start while another PS2Recomp game is
+`scripts\run_game.sh <seconds> <log> build/gcc/PS2Recomp/ps2xRuntime/ps2EntryRunner.exe` runs the game for a fixed time and refuses to start while another PS2Recomp game is
 running, so measurements stay clean.
 
 </details>
 
 ## Known issues
 
-- **The mission is slow:** about 12 frames per second. VU1 runs in an interpreter on the game's own thread, and the GS is a
-  software rasterizer; running VIF1/VU1 alongside the EE is the next step.
+- **The mission is slow:** about 13 frames per second. Next: profiling it on the GCC build, running VIF1/VU1 alongside
+  the EE (`PS2X_VIF1_THREAD`) and the GPU renderer (`PS2X_GS_RENDERER=parallel`, which already draws the mission
+  correctly).
 - **No sound or music yet.**
 - **The Chapter 1 opening movie is skipped:** its MPEG stream shows grey, so the movie is passed over.
 - **Unchecked against hardware:** the sky band and camera framing in the first mission, and the untextured fog on the ground.
@@ -159,7 +170,8 @@ running, so measurements stay clean.
 |---|---|
 | `recomp/` | Recompiler configs, Ghidra project scripts and function map, analysis and test scripts, input scripts |
 | `runtime/` | Drakengard override module (game-specific bindings, test harness hooks) |
-| `scripts/` | Build scripts (tools, runner, unit tests, VU1 replay), runner sync, game launcher |
+| `scripts/` | Build scripts (tools, GCC and MSVC runners, unit tests, VU1 replay), runner sync, game launcher |
+| `CMakeLists.txt` | GCC build of the game executable: PS2Recomp's runner plus the VU microcode compiled ahead of time |
 | `docs/` | Design notes and plans |
 | `PS2Recomp/` | PS2Recomp fork (separate clone, not tracked here) |
 

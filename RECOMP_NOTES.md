@@ -133,6 +133,27 @@ small glyph sprites, and IOP kernel scheduling (`IopKernel::beginNextReady`, ~8%
   (shadow-check runs are ~3x slower). `recomp/input_newgame_frames.txt` reaches the first mission; the seconds
   log lines give each press's frame for recalibrating.
 
+## GCC build with the VU microcode compiled ahead of time (fork main c4e17db, 2026-10-25)
+
+- Fork main brought `ps2_vu_aot`: it scans the ELF for VIF MPG uploads and writes one C++ file per microcode
+  fragment (Drakengard: 160 fragments, 30,654 instruction pairs, 8 also as VU0 microcode) in `recomp/vu1_aot`.
+  At run time a fragment replaces the interpreter while VU code memory holds its exact bytes.
+- MSVC cannot build those files: each pair calls the interpreter's `__forceinline` `stepPair()` with a constexpr
+  decode, and MSVC's optimizer (c2.dll) spends ~6 minutes on a 33 KB fragment (front end: 1 s); unity batches
+  of 32 fragments of 240 KB ran for over an hour. GCC 16.2 (MSYS2 UCRT64) takes ~47 s for the same file at -O3.
+- So the game executable is now built with GCC like the TMB port: top-level `CMakeLists.txt` adds PS2Recomp
+  and an object library for `recomp/vu1_aot/*.cpp` (unity off, -O3 -g0, 4 at once);
+  `scripts/build_runner_gcc.sh` configures `build/gcc` (custom `Fast` config: -O2, no LTO), builds and copies
+  the UCRT64 DLLs next to the exe. Full build: 62 min with 10 jobs.
+- First results, GCC build, async GS raster, quiet machine: logos/title at 50 game frames/s, mission 12.8 fps.
+  A run with `PS2X_VU_AOT=0` showed ~14 fps in the mission before another game started on the machine, so the
+  compiled microcode is not a clear win yet: needs a clean A/B and a profile.
+- `PS2X_GS_LAG=1` and `PS2X_GS_RENDERER=parallel` (both with `PS2X_VIF1_THREAD=1`) hold the mission at exactly
+  12.5 fps (4 vblanks per game frame, quantized pacing); paraLLEl-GS draws the mission like the CPU rasterizer.
+  `PS2X_VIF1_THREAD=1` alone was very slow at the title screen in a run that overlapped another game: recheck.
+- The machine is shared with the VP2 and TMB sessions (and the c2c room): benchmark only when no vp2s.exe or
+  other ps2EntryRunner runs, and announce timed runs.
+
 ## Test harness (opt-in, environment variables)
 - `PS2X_CAPTURE_DIR=<folder>` (+ `PS2X_CAPTURE_INTERVAL=<sec>`, default 5): the runtime saves the presented
   frame as `frame_<tenths of a second>.png` (`ps2_runtime.cpp`, `UploadFrame`); works minimized/unfocused.

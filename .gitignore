@@ -9,6 +9,8 @@
 # Generated code and Ghidra project (reproducible with scripts/ and recomp/*.toml)
 /recomp/output/
 /recomp/output_ghidra/
+/recomp/vu1_aot/
+/build/
 /recomp/ghidra/project/
 
 # Run artifacts

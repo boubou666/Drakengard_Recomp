@@ -1,6 +1,8 @@
 #!/bin/bash
 # Runs the Drakengard runner from game/ with the environment already set by the caller:
-#   scripts/run_game.sh <seconds> <log file> [runner exe name]
+#   scripts/run_game.sh <seconds> <log file> [runner exe]
+# The runner is an exe name in the MSVC build (out/build-fast), or a path such as
+# build/gcc/PS2Recomp/ps2xRuntime/ps2EntryRunner.exe (scripts/build_runner_gcc.sh), relative to the repo root.
 # Refuses to start while the Valkyrie Profile 2 recomp (vp2s.exe) or another runner is running:
 # both games share the CPU, so overlapping runs skew timings and slow-motion checks.
 seconds="$1"
@@ -11,5 +13,9 @@ if tasklist 2>/dev/null | grep -qi -E "vp2s\.exe|ps2EntryRunner"; then
     tasklist 2>/dev/null | grep -i -E "vp2s\.exe|ps2EntryRunner" >&2
     exit 3
 fi
+case "$exe" in
+    */*) runner="../$exe" ;;
+    *) runner="../PS2Recomp/out/build-fast/ps2xRuntime/$exe" ;;
+esac
 cd "$(dirname "$0")/../game" || exit 1
-timeout "$seconds" "../PS2Recomp/out/build-fast/ps2xRuntime/$exe" D:/Drakengard_Recomp/game/SLES_523.22 > "$log" 2>&1
+timeout "$seconds" "$runner" D:/Drakengard_Recomp/game/SLES_523.22 > "$log" 2>&1

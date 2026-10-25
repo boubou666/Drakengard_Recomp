@@ -3,7 +3,8 @@
 usage: python scripts/sync_runner.py [generated_dir]   (default recomp/output_ghidra)
 
 Copies only files whose contents changed (keeps ninja rebuilds small), removes runner sources that are
-no longer generated, and installs runtime/zz_drakengard_overrides.cpp next to them.
+no longer generated, and installs runtime/zz_drakengard_overrides.cpp next to them. The VU microcode compiled
+ahead of time (recomp/vu1_aot) stays where it is: CMakeLists.txt builds it outside the runner's unity batches.
 """
 import filecmp
 import os
