@@ -41,6 +41,19 @@ no sound yet, and the Chapter 1 opening movie is skipped.
 | Combat, dragon flight, later chapters, saving | ⏳ |
 | Widescreen, higher resolution | ⏳ |
 
+**Native port** (no PS2 hardware emulation left, not even a small part: the shared goal of the fork's ports). Native
+means the game's draws built straight from its own data (vertices, matrices, materials), with no GIF packet, no GS
+state machine and no copy of GS memory in between.
+
+| Layer | |
+|---|:---:|
+| IOP modules recompiled to C++ (today: the R3000A interpreter runs the game's IRX) | ⏳ |
+| Sound and IOP on the PC's clock | ⏳ |
+| GS drawn with OpenGL on the GPU (today: the CPU rasterizer, or paraLLEl-GS) | ⏳ |
+| Frame loop on the PC's clock | ⏳ |
+| VU0 / VU1 microcode compiled ahead of time (`ps2_vu_aot`), no VU interpreter | ✅ |
+| VU1 programs translated to C++, native draws from the game's data, no GS front end | ⏳ |
+
 ✅ works · 🔧 in progress · ⏳ not reached yet
 
 [RECOMP_NOTES.md](RECOMP_NOTES.md) records how the port was brought up, every runtime fix and how it was found, the
